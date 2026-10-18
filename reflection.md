@@ -4,25 +4,25 @@
 
 **a. Initial design**
 
-My initial UML has four classes with simple "has-a" relationships: an **Owner** has many **Pets**, each **Pet** has many **Tasks**, and a **Scheduler** works on behalf of one Owner to build the day's plan.
+I went with four classes. An Owner has pets, each Pet has tasks, and a Scheduler looks at the owner's pets and tasks to make a plan for the day.
 
-- **Task**: a single care activity. It holds what needs to happen (title, category), how long it takes, its priority, an optional preferred time, how often it repeats (once/daily/weekly), its due date, which pet it is for, and whether it's done. It can mark itself complete, turn its priority into a number for sorting, and create its next occurrence if it repeats.
-- **Pet**: basic pet info (name, species, age) plus the list of tasks that belong to it. It is responsible for adding and removing its own tasks.
-- **Owner**: the person using the app. It stores how many minutes they have for pet care each day, their preferences, and their pets. It can add pets and gather every task across all pets into one list.
-- **Scheduler**: the "brain". It takes an Owner and is responsible for all planning logic: sorting tasks by priority or time, filtering by pet or completion status, detecting time conflicts, choosing which tasks fit in the available time, and explaining why the plan looks the way it does.
+- **Task** is one thing that needs to get done, like a walk or giving meds. It stores the name, how long it takes, how important it is (low, medium, high), what time it should happen, whether it repeats daily or weekly, when it's due, which pet it's for, and whether it's done.
+- **Pet** has the pet's name, species, and age, plus its list of tasks. You can add or remove tasks from a pet.
+- **Owner** is the person using the app. It keeps track of their pets and how many minutes they have for pet care each day. It can also give you all the tasks for all the pets in one list.
+- **Scheduler** is where the actual planning happens. It sorts tasks, filters them, checks if any of them clash, picks which ones fit in the day, and explains why.
 
-I kept data (Owner, Pet, Task as dataclasses) separate from logic (Scheduler) so the scheduling rules live in one place and are easy to test.
+I made Task, Pet, and Owner simple data classes and put all the planning logic in Scheduler. That way the rules are in one place and easier to test.
 
 **b. Design changes**
 
-Yes. After drafting the skeleton, I asked my AI assistant to review `pawpal_system.py` for missing relationships and logic bottlenecks, and made four changes:
+Yes. After I wrote the skeleton, I asked AI to look over it for anything missing. It found a few problems, and I changed four things:
 
-1. **`Pet.add_task()` now stamps `task.pet_name`.** The pet's name was stored on both Pet and Task, so the two could disagree (e.g., a task under Mochi labeled "Biscuit"). Letting the Pet set it keeps a single source of truth.
-2. **Added `Scheduler.skipped`.** `generate_plan()` only returned chosen tasks, so `explain_plan()` had no way to say *why* something was left out. The scheduler now records skipped tasks so the explanation can cover both.
-3. **Added `Pet.complete_task(title)`.** `Task.next_occurrence()` existed, but nothing called it, so recurring tasks would never come back. Completing a task through the Pet marks it done and adds the next daily/weekly copy to the pet's list.
-4. **Task validates `priority` in `__post_init__`.** A value like "High" or "urgent" would silently get the wrong sort rank. Priority is now lowercased and must be low/medium/high.
+1. Each task stores its pet's name, but nothing made sure it was the right name. A task under Mochi could end up labeled "Biscuit." Now when you add a task to a pet, the pet fills in its own name.
+2. The plan only listed the tasks that made it in, so there was no way to explain why something got left out. Now the scheduler keeps a list of skipped tasks too.
+3. I had a method to make the next copy of a repeating task, but nothing ever used it, so daily tasks would never come back. I added a way to complete a task through the pet, which also creates the next one.
+4. If someone typed "High" or "urgent" for priority, sorting would break. Now it lowercases the value and only accepts low, medium, or high.
 
-One suggestion I considered but did **not** adopt: caching the result of `Owner.get_all_tasks()`. With only a few pets and tasks the cost of rebuilding the list is negligible, and a cache could return stale data after tasks are added or completed.
+AI also suggested saving the full task list instead of rebuilding it every time. I skipped that one. With only a few pets it doesn't really matter, and a saved list could get out of date when tasks change.
 
 ---
 
@@ -35,13 +35,13 @@ One suggestion I considered but did **not** adopt: caching the result of `Owner.
 
 **b. Tradeoffs**
 
-**Greedy, priority-first selection instead of an optimal fit.** `generate_plan()` walks tasks from highest to lowest priority and keeps each one that still fits in the remaining minutes. It never goes back to swap tasks around, so it doesn't always pack the day as fully as possible. For example, a low-priority 40-minute bath is skipped once the higher-priority tasks have used up the budget, even if dropping a medium task would have made room. A "best fit" approach (like the knapsack problem) could squeeze in more total care, but it is harder to explain and its choices can feel random to the owner.
+The main tradeoff is how the scheduler picks tasks. It starts with the most important ones and adds each task if there's still time left. It never goes back to rearrange things, so sometimes the day isn't packed as tightly as it could be. In my demo, the 40-minute bath gets skipped because the important tasks already used up the time. A smarter method might fit in a bit more, but it would be harder to explain, and the choices could seem random.
 
-This is reasonable for a pet owner because the rule is predictable and easy to trust: important things like meds and feeding are always considered first, and `explain_plan()` can say in one sentence why something was left out. With only a handful of tasks per day, the minutes lost to not packing perfectly are small.
+I think that's fine for a pet owner. The rule is simple: meds and feeding always come first. The app can also explain in one sentence why something was skipped. With only a few tasks a day, you don't lose much time.
 
-**Conflicts are warned about, not fixed.** `detect_conflicts()` checks for overlapping time windows (not just identical start times) and returns warning messages, but it doesn't move tasks around. Some "conflicts" are fine in real life (one person can put down a cat's breakfast while walking the dog out the door), so the owner is a better judge than an automatic rescheduler.
+Another tradeoff is that the scheduler only warns about clashes, it doesn't fix them. It checks whether two tasks overlap in time (not just whether they start at the same minute), but it doesn't move anything. Some overlaps are fine in real life, like feeding the cat right before taking the dog out, so I'd rather let the owner decide.
 
-**Readability over cleverness in conflict detection.** My first version sorted tasks and used an early `break` to skip comparisons. When I asked AI how to simplify it, it suggested checking every pair with `itertools.combinations` and a single overlap test. That does a few more comparisons, but with a dozen tasks a day the difference is invisible, and the code is much easier to read and verify, so I kept the simpler version.
+I also picked simple code over clever code for the conflict check. My first version used a trick to skip some comparisons. When I asked AI how to simplify it, it suggested just checking every pair of tasks. That's a little slower, but with a dozen tasks you'd never notice, and it's much easier to read, so I kept the simpler one.
 
 ---
 

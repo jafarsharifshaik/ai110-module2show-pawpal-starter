@@ -107,32 +107,55 @@ Filtered: Mochi's open tasks
 
 ## 🧪 Testing PawPal+
 
+Run the tests from the project folder (with the virtual environment turned on):
+
 ```bash
-# Run the full test suite:
-pytest
-
-# Run with coverage:
-pytest --cov
+python -m pytest
 ```
 
-Sample test output:
+### What the tests cover
+
+All tests are in `tests/test_pawpal.py` (26 tests):
+
+- **Basics:** marking a task done, adding tasks to a pet, getting every pet's tasks from the owner, and making sure priority only accepts low, medium, or high.
+- **Sorting:** tasks come back in time order, tasks with no time go last, "9:00" sorts before "10:00", earlier dates come first, and high priority comes before low.
+- **Filtering:** by pet, by done or not done, both together, and a pet with no tasks.
+- **Recurring tasks:** finishing a daily task adds one for tomorrow, a weekly task comes back in 7 days, one-time tasks don't repeat, and an overdue daily task comes back tomorrow instead of on a day that's already passed.
+- **Conflicts:** two tasks at the exact same time (same pet or different pets) get flagged, and so do tasks that only partly overlap. Back-to-back tasks, tasks on different days, and tasks with no time are not flagged.
+- **Daily plan:** the plan stays within the owner's free time, skips what doesn't fit, leaves out finished and future tasks, and works with no tasks or zero free minutes.
+
+### Test results
 
 ```
-# Paste your pytest output here
+============================= test session starts ==============================
+platform darwin -- Python 3.13.15, pytest-9.1.1, pluggy-1.7.0
+rootdir: /Users/jafarsharif.shaik/ai110-module2show-pawpal-starter
+configfile: pytest.ini
+testpaths: tests
+plugins: anyio-4.15.1
+collected 26 items
+
+tests/test_pawpal.py ..........................                          [100%]
+
+============================== 26 passed in 0.04s ==============================
 ```
+
+### Confidence level: ⭐⭐⭐⭐ (4/5)
+
+All 26 tests pass, and they cover the main features plus the tricky cases I could think of. I'm not giving it 5 stars because the tests only check the logic in `pawpal_system.py`, not the Streamlit app. Also, the scheduler doesn't check for bad input like a time typed as "25:99" or a negative duration.
 
 ## 📐 Smarter Scheduling
 
-All scheduling logic lives in the `Scheduler` class in `pawpal_system.py`. It always reads tasks through `Owner.get_all_tasks()`, so every feature works across all of an owner's pets.
+All the scheduling code is in the `Scheduler` class in `pawpal_system.py`. It gets tasks from `Owner.get_all_tasks()`, so everything works across all of the owner's pets, not just one.
 
 | Feature | Method(s) | Notes |
 |---------|-----------|-------|
-| Task sorting | `Scheduler.sort_by_time()`, `Scheduler.sort_by_priority()` | `sort_by_time` uses `sorted()` with a lambda key of (due date, has no time?, minutes after midnight), so tasks appear in clock order with "anytime" tasks last for each day. `sort_by_priority` ranks high → low (via `Task.priority_rank()`), breaking ties with the shorter task. |
-| Filtering | `Scheduler.filter_tasks(pet_name=None, completed=None)` | Filter by pet, by completion status, or both. Passing `None` means "don't filter on that". |
-| Daily plan | `Scheduler.generate_plan()`, `Scheduler.explain_plan()` | Greedy: takes open tasks due today or earlier, highest priority first, keeping each one that still fits in `Owner.available_minutes`. Tasks that don't fit go to `Scheduler.skipped`, and `explain_plan()` says why each task was chosen or skipped. |
-| Conflict handling | `Scheduler.detect_conflicts()` | Flags any two timed tasks on the same day whose windows overlap (start + duration), for the same pet or different pets. Returns warning strings instead of raising, so the app never crashes on a clash. |
-| Recurring tasks | `Scheduler.mark_task_complete()`, `Pet.complete_task()`, `Task.next_occurrence()` | Completing a `daily` or `weekly` task automatically adds a fresh copy due `today + timedelta(days=1)` or `today + timedelta(weeks=1)`. One-off tasks just stay completed. |
-| Input safety | `Task.__post_init__()` | Priority is lowercased and must be low/medium/high, so values like "High" sort correctly. |
+| Task sorting | `Scheduler.sort_by_time()`, `Scheduler.sort_by_priority()` | Sorts tasks by date and then by time. Tasks with no set time go at the end of the day. Priority sorting puts high first, and if two tasks tie, the shorter one goes first. |
+| Filtering | `Scheduler.filter_tasks(pet_name=None, completed=None)` | Shows tasks for one pet, only done or not-done tasks, or both. |
+| Daily plan | `Scheduler.generate_plan()`, `Scheduler.explain_plan()` | Starts with the most important tasks and adds each one if there's still time left in the day. Anything that doesn't fit gets skipped, and the explanation says why. |
+| Conflict handling | `Scheduler.detect_conflicts()` | Warns when two tasks overlap in time, whether they're for the same pet or different pets. It just prints a warning and doesn't crash. |
+| Recurring tasks | `Scheduler.mark_task_complete()`, `Pet.complete_task()`, `Task.next_occurrence()` | When you finish a daily task, a new one is added for tomorrow. A weekly task comes back in 7 days. One-time tasks just stay done. |
+| Input check | `Task.__post_init__()` | Priority has to be low, medium, or high. Capital letters like "High" are fine. |
 
 ## 📸 Demo Walkthrough
 
