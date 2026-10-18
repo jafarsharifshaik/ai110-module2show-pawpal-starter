@@ -35,8 +35,13 @@ One suggestion I considered but did **not** adopt: caching the result of `Owner.
 
 **b. Tradeoffs**
 
-- Describe one tradeoff your scheduler makes.
-- Why is that tradeoff reasonable for this scenario?
+**Greedy, priority-first selection instead of an optimal fit.** `generate_plan()` walks tasks from highest to lowest priority and keeps each one that still fits in the remaining minutes. It never goes back to swap tasks around, so it doesn't always pack the day as fully as possible. For example, a low-priority 40-minute bath is skipped once the higher-priority tasks have used up the budget, even if dropping a medium task would have made room. A "best fit" approach (like the knapsack problem) could squeeze in more total care, but it is harder to explain and its choices can feel random to the owner.
+
+This is reasonable for a pet owner because the rule is predictable and easy to trust: important things like meds and feeding are always considered first, and `explain_plan()` can say in one sentence why something was left out. With only a handful of tasks per day, the minutes lost to not packing perfectly are small.
+
+**Conflicts are warned about, not fixed.** `detect_conflicts()` checks for overlapping time windows (not just identical start times) and returns warning messages, but it doesn't move tasks around. Some "conflicts" are fine in real life (one person can put down a cat's breakfast while walking the dog out the door), so the owner is a better judge than an automatic rescheduler.
+
+**Readability over cleverness in conflict detection.** My first version sorted tasks and used an early `break` to skip comparisons. When I asked AI how to simplify it, it suggested checking every pair with `itertools.combinations` and a single overlap test. That does a few more comparisons, but with a dozen tasks a day the difference is invisible, and the code is much easier to read and verify, so I kept the simpler version.
 
 ---
 

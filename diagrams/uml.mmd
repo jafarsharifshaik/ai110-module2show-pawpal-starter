@@ -17,7 +17,7 @@ classDiagram
         +list~Task~ tasks
         +add_task(task: Task) None
         +remove_task(title: str) None
-        +complete_task(title: str) None
+        +complete_task(title: str) Task
     }
 
     class Task {
@@ -38,6 +38,7 @@ classDiagram
     class Scheduler {
         +Owner owner
         +list~Task~ skipped
+        +mark_task_complete(task: Task) Task
         +generate_plan() list~Task~
         +sort_by_priority(tasks: list~Task~) list~Task~
         +sort_by_time(tasks: list~Task~) list~Task~

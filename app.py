@@ -130,9 +130,7 @@ else:
             picked = st.selectbox("Mark a task done", range(len(open_tasks)), format_func=labels.__getitem__)
         with col2:
             if st.button("Mark done"):
-                task = open_tasks[picked]
-                pet = next(p for p in owner.pets if p.name == task.pet_name)
-                pet.complete_task(task.title)
+                scheduler.mark_task_complete(open_tasks[picked])
                 st.rerun()
 
 st.divider()

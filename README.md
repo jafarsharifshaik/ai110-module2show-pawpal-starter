@@ -44,19 +44,65 @@ pip install -r requirements.txt
 
 ## 🖥️ Sample Output
 
-Output from running `python main.py` (one owner, two pets, six tasks, 90-minute daily budget):
+Output from running `python main.py` (one owner, two pets, seven tasks added out of order, 90-minute daily budget). It shows sorting, filtering, conflict warnings, the generated plan, and a daily task recurring after it's completed:
 
 ```
+Tasks as entered
+----------------
+    18:00  Evening walk         Mochi    medium due 2026-10-17  [open]
+  anytime  Bath and brush       Mochi    low    due 2026-10-17  [open]
+    07:30  Morning walk         Mochi    high   due 2026-10-17  [open]
+    18:00  Flea treatment       Mochi    medium due 2026-10-17  [open]
+    12:00  Thyroid meds         Biscuit  high   due 2026-10-17  [open]
+    19:30  Laser pointer play   Biscuit  medium due 2026-10-17  [open]
+    07:30  Breakfast            Biscuit  high   due 2026-10-17  [open]
+
+Sorted by time
+--------------
+    07:30  Morning walk         Mochi    high   due 2026-10-17  [open]
+    07:30  Breakfast            Biscuit  high   due 2026-10-17  [open]
+    12:00  Thyroid meds         Biscuit  high   due 2026-10-17  [open]
+    18:00  Evening walk         Mochi    medium due 2026-10-17  [open]
+    18:00  Flea treatment       Mochi    medium due 2026-10-17  [open]
+    19:30  Laser pointer play   Biscuit  medium due 2026-10-17  [open]
+  anytime  Bath and brush       Mochi    low    due 2026-10-17  [open]
+
+Filtered: Biscuit only
+----------------------
+    12:00  Thyroid meds         Biscuit  high   due 2026-10-17  [open]
+    19:30  Laser pointer play   Biscuit  medium due 2026-10-17  [open]
+    07:30  Breakfast            Biscuit  high   due 2026-10-17  [open]
+
+Conflict check
+--------------
+  WARNING: 'Morning walk' (Mochi, 07:30-08:00) overlaps 'Breakfast' (Biscuit, 07:30-07:40)
+  WARNING: 'Evening walk' (Mochi, 18:00-18:25) overlaps 'Flea treatment' (Mochi, 18:00-18:05)
+
 Today's Schedule
 ================
-Plan for Jordan: 85 of 90 minutes used.
+Plan for Jordan: 90 of 90 minutes used.
+    07:30  Breakfast (Biscuit), 10 min, chosen because it is high priority and fits the time budget
     07:30  Morning walk (Mochi), 30 min, chosen because it is high priority and fits the time budget
-    07:45  Breakfast (Biscuit), 10 min, chosen because it is high priority and fits the time budget
     12:00  Thyroid meds (Biscuit), 5 min, chosen because it is high priority and fits the time budget
+    18:00  Flea treatment (Mochi), 5 min, chosen because it is medium priority and fits the time budget
     18:00  Evening walk (Mochi), 25 min, chosen because it is medium priority and fits the time budget
     19:30  Laser pointer play (Biscuit), 15 min, chosen because it is medium priority and fits the time budget
-  Skipped  Bath and brush (Mochi): needs 40 min, only 5 min left after higher-priority tasks
-  Warning: 'Morning walk' (Mochi, 07:30-08:00) overlaps 'Breakfast' (Biscuit, 07:45-07:55)
+  Skipped  Bath and brush (Mochi): needs 40 min, only 0 min left after higher-priority tasks
+  Warning: 'Breakfast' (Biscuit, 07:30-07:40) overlaps 'Morning walk' (Mochi, 07:30-08:00)
+  Warning: 'Flea treatment' (Mochi, 18:00-18:05) overlaps 'Evening walk' (Mochi, 18:00-18:25)
+
+Completed 'Morning walk' -> next one created for 2026-10-18
+
+Filtered: completed tasks
+-------------------------
+    07:30  Morning walk         Mochi    high   due 2026-10-17  [done]
+
+Filtered: Mochi's open tasks
+----------------------------
+    18:00  Evening walk         Mochi    medium due 2026-10-17  [open]
+    18:00  Flea treatment       Mochi    medium due 2026-10-17  [open]
+  anytime  Bath and brush       Mochi    low    due 2026-10-17  [open]
+    07:30  Morning walk         Mochi    high   due 2026-10-18  [open]
 ```
 
 ## 🧪 Testing PawPal+
@@ -77,14 +123,16 @@ Sample test output:
 
 ## 📐 Smarter Scheduling
 
-> Fill in once you've implemented scheduling logic.
+All scheduling logic lives in the `Scheduler` class in `pawpal_system.py`. It always reads tasks through `Owner.get_all_tasks()`, so every feature works across all of an owner's pets.
 
 | Feature | Method(s) | Notes |
 |---------|-----------|-------|
-| Task sorting | | e.g., by priority, duration |
-| Filtering | | e.g., skip tasks if time runs out |
-| Conflict handling | | e.g., overlapping time slots |
-| Recurring tasks | | e.g., daily vs. weekly |
+| Task sorting | `Scheduler.sort_by_time()`, `Scheduler.sort_by_priority()` | `sort_by_time` uses `sorted()` with a lambda key of (due date, has no time?, minutes after midnight), so tasks appear in clock order with "anytime" tasks last for each day. `sort_by_priority` ranks high → low (via `Task.priority_rank()`), breaking ties with the shorter task. |
+| Filtering | `Scheduler.filter_tasks(pet_name=None, completed=None)` | Filter by pet, by completion status, or both. Passing `None` means "don't filter on that". |
+| Daily plan | `Scheduler.generate_plan()`, `Scheduler.explain_plan()` | Greedy: takes open tasks due today or earlier, highest priority first, keeping each one that still fits in `Owner.available_minutes`. Tasks that don't fit go to `Scheduler.skipped`, and `explain_plan()` says why each task was chosen or skipped. |
+| Conflict handling | `Scheduler.detect_conflicts()` | Flags any two timed tasks on the same day whose windows overlap (start + duration), for the same pet or different pets. Returns warning strings instead of raising, so the app never crashes on a clash. |
+| Recurring tasks | `Scheduler.mark_task_complete()`, `Pet.complete_task()`, `Task.next_occurrence()` | Completing a `daily` or `weekly` task automatically adds a fresh copy due `today + timedelta(days=1)` or `today + timedelta(weeks=1)`. One-off tasks just stay completed. |
+| Input safety | `Task.__post_init__()` | Priority is lowercased and must be low/medium/high, so values like "High" sort correctly. |
 
 ## 📸 Demo Walkthrough
 
