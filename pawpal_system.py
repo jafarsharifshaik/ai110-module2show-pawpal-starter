@@ -2,12 +2,25 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+import json
+from dataclasses import asdict, dataclass, field, replace
 from datetime import date, datetime, timedelta
 from itertools import combinations
+from pathlib import Path
 
 PRIORITY_RANKS = {"low": 1, "medium": 2, "high": 3}
 RECURRENCE_STEPS = {"daily": timedelta(days=1), "weekly": timedelta(weeks=1)}
+
+# Display helpers shared by the CLI demo and the Streamlit app.
+PRIORITY_EMOJI = {"high": "🔴", "medium": "🟡", "low": "🟢"}
+CATEGORY_EMOJI = {
+    "walk": "🦮",
+    "feeding": "🍖",
+    "meds": "💊",
+    "grooming": "🛁",
+    "enrichment": "🎾",
+    "general": "📝",
+}
 
 
 def _to_minutes(hhmm: str) -> int:
@@ -51,18 +64,34 @@ class Task:
         """Return a number for sorting (higher = more important)."""
         return PRIORITY_RANKS[self.priority]
 
-    def next_occurrence(self) -> Task | None:
+    def next_occurrence(self, today: date | None = None) -> Task | None:
         """Return the next copy of a recurring task, or None if it doesn't repeat.
 
-        The next due date is counted from today (or from the current due date, if that's
-        later), so a daily task finished late comes back tomorrow instead of in the past,
-        and one finished early doesn't land on the day it was already due.
+        The next due date is the original due date plus a whole number of steps (days or
+        weeks), picked so it lands after both the due date and today. That means:
+        - a weekly task stays on the same weekday, even if it was finished late;
+        - a task finished late never comes back on a day that already passed;
+        - a task finished early doesn't come back on the day it was already due.
+        `today` can be passed in for testing; it defaults to date.today().
         """
         step = RECURRENCE_STEPS.get(self.frequency)
         if step is None:
             return None
-        start = max(self.due_date, date.today())
-        return replace(self, due_date=start + step, completed=False)
+        today = today or date.today()
+        threshold = max(self.due_date, today)
+        steps_needed = (threshold - self.due_date) // step + 1
+        return replace(self, due_date=self.due_date + step * steps_needed, completed=False)
+
+    def to_dict(self) -> dict:
+        """Convert to a JSON-friendly dict (the date becomes an ISO string)."""
+        data = asdict(self)
+        data["due_date"] = self.due_date.isoformat()
+        return data
+
+    @classmethod
+    def from_dict(cls, data: dict) -> Task:
+        """Rebuild a Task from to_dict() output."""
+        return cls(**{**data, "due_date": date.fromisoformat(data["due_date"])})
 
 
 @dataclass
@@ -94,6 +123,23 @@ class Pet:
                 return follow_up
         raise ValueError(f"{self.name} has no open task titled {title!r}")
 
+    def to_dict(self) -> dict:
+        """Convert to a JSON-friendly dict, including the pet's tasks."""
+        return {
+            "name": self.name,
+            "species": self.species,
+            "age": self.age,
+            "tasks": [t.to_dict() for t in self.tasks],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> Pet:
+        """Rebuild a Pet (and its tasks) from to_dict() output."""
+        pet = cls(data["name"], data["species"], data.get("age", 0))
+        for task_data in data.get("tasks", []):
+            pet.add_task(Task.from_dict(task_data))
+        return pet
+
 
 @dataclass
 class Owner:
@@ -111,6 +157,34 @@ class Owner:
     def get_all_tasks(self) -> list[Task]:
         """Collect tasks across all of the owner's pets."""
         return [task for pet in self.pets for task in pet.tasks]
+
+    def to_dict(self) -> dict:
+        """Convert the owner, their pets, and all tasks to a JSON-friendly dict."""
+        return {
+            "name": self.name,
+            "available_minutes": self.available_minutes,
+            "preferences": list(self.preferences),
+            "pets": [p.to_dict() for p in self.pets],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> Owner:
+        """Rebuild an Owner (with pets and tasks) from to_dict() output."""
+        return cls(
+            name=data["name"],
+            available_minutes=data.get("available_minutes", 60),
+            preferences=data.get("preferences", []),
+            pets=[Pet.from_dict(p) for p in data.get("pets", [])],
+        )
+
+    def save_to_json(self, path: str | Path = "data.json") -> None:
+        """Save the owner, pets, and tasks to a JSON file."""
+        Path(path).write_text(json.dumps(self.to_dict(), indent=2))
+
+    @classmethod
+    def load_from_json(cls, path: str | Path = "data.json") -> Owner:
+        """Load an owner saved with save_to_json(). Raises FileNotFoundError if the file is missing."""
+        return cls.from_dict(json.loads(Path(path).read_text()))
 
 
 class Scheduler:
@@ -161,6 +235,22 @@ class Scheduler:
         """
         return sorted(tasks, key=lambda t: (-t.priority_rank(), t.duration_minutes))
 
+    def sort_by_priority_then_time(self, tasks: list[Task]) -> list[Task]:
+        """Return tasks grouped by priority (high first), and in date/time order within each group.
+
+        Useful as a "what matters most today" view: all high-priority tasks in the order
+        they happen, then medium, then low.
+        """
+        return sorted(
+            tasks,
+            key=lambda t: (
+                -t.priority_rank(),
+                t.due_date,
+                t.time == "",
+                _to_minutes(t.time) if t.time else 0,
+            ),
+        )
+
     def sort_by_time(self, tasks: list[Task]) -> list[Task]:
         """Return tasks ordered by due date, then by their preferred start time.
 
@@ -202,6 +292,34 @@ class Scheduler:
                     f"'{b.title}' ({b.pet_name}, {b.time}-{_to_hhmm(b_end)})"
                 )
         return warnings
+
+    def find_next_available_slot(
+        self,
+        duration_minutes: int,
+        day: date | None = None,
+        day_start: str = "07:00",
+        day_end: str = "21:00",
+    ) -> str | None:
+        """Return the earliest "HH:MM" start time where a task of this length fits without clashing.
+
+        Algorithm: collect the busy windows (open, timed tasks due that day), sort them by start,
+        and walk through the gaps between them from day_start. The first gap that is long enough
+        wins. Returns None if nothing fits before day_end.
+        """
+        day = day or date.today()
+        busy = sorted(
+            (_to_minutes(t.time), _to_minutes(t.time) + t.duration_minutes)
+            for t in self.filter_tasks(completed=False)
+            if t.time and t.due_date == day
+        )
+        cursor, end = _to_minutes(day_start), _to_minutes(day_end)
+        for busy_start, busy_end in busy:
+            if busy_start - cursor >= duration_minutes:
+                break  # the gap before this busy window is big enough
+            cursor = max(cursor, busy_end)
+        if cursor + duration_minutes <= end:
+            return _to_hhmm(cursor)
+        return None
 
     def explain_plan(self, plan: list[Task]) -> str:
         """Return a human-readable explanation of why each task was chosen or skipped."""

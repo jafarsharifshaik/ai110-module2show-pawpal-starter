@@ -8,6 +8,10 @@ classDiagram
         +list~Pet~ pets
         +add_pet(pet: Pet) None
         +get_all_tasks() list~Task~
+        +to_dict() dict
+        +from_dict(data: dict)$ Owner
+        +save_to_json(path: str) None
+        +load_from_json(path: str)$ Owner
     }
 
     class Pet {
@@ -18,6 +22,8 @@ classDiagram
         +add_task(task: Task) None
         +remove_task(title: str) None
         +complete_task(title: str) Task
+        +to_dict() dict
+        +from_dict(data: dict)$ Pet
     }
 
     class Task {
@@ -32,7 +38,9 @@ classDiagram
         +bool completed
         +mark_complete() None
         +priority_rank() int
-        +next_occurrence() Task
+        +next_occurrence(today: date) Task
+        +to_dict() dict
+        +from_dict(data: dict)$ Task
     }
 
     class Scheduler {
@@ -42,8 +50,10 @@ classDiagram
         +explain_plan(plan: list~Task~) str
         +sort_by_time(tasks: list~Task~) list~Task~
         +sort_by_priority(tasks: list~Task~) list~Task~
+        +sort_by_priority_then_time(tasks: list~Task~) list~Task~
         +filter_tasks(pet_name: str, completed: bool) list~Task~
         +detect_conflicts(tasks: list~Task~) list~str~
+        +find_next_available_slot(duration_minutes: int, day: date, day_start: str, day_end: str) str
         +mark_task_complete(task: Task) Task
     }
 

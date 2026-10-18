@@ -1,18 +1,33 @@
 from datetime import date
+from pathlib import Path
 
 import streamlit as st
 
-from pawpal_system import Owner, Pet, Scheduler, Task
+from pawpal_system import CATEGORY_EMOJI, PRIORITY_EMOJI, Owner, Pet, Scheduler, Task
+
+DATA_FILE = Path(__file__).parent / "data.json"
 
 st.set_page_config(page_title="PawPal+", page_icon="🐾", layout="centered")
 
 st.title("🐾 PawPal+")
 st.caption("Plan your pets' care for the day based on time, priority, and schedule.")
 
+
+
+def load_owner() -> Owner:
+    """Load saved data from data.json, or start fresh if there isn't any (or it's unreadable)."""
+    if DATA_FILE.exists():
+        try:
+            return Owner.load_from_json(DATA_FILE)
+        except (ValueError, KeyError, TypeError):
+            st.warning("Couldn't read the saved data in data.json, so starting fresh.")
+    return Owner("Jordan", available_minutes=60)
+
+
 # Streamlit reruns this script on every interaction, so keep the Owner in session_state.
-# It's created once per browser session; later reruns reuse the same object (and its pets/tasks).
+# It's loaded once per browser session (from data.json if it exists); later reruns reuse it.
 if "owner" not in st.session_state:
-    st.session_state.owner = Owner("Jordan", available_minutes=60)
+    st.session_state.owner = load_owner()
 
 owner: Owner = st.session_state.owner
 scheduler = Scheduler(owner)
@@ -23,14 +38,13 @@ def task_rows(tasks: list[Task]) -> list[dict]:
     return [
         {
             "Time": t.time or "anytime",
-            "Task": t.title,
+            "Task": f"{CATEGORY_EMOJI.get(t.category, '📝')} {t.title}",
             "Pet": t.pet_name,
             "Minutes": t.duration_minutes,
-            "Priority": t.priority,
-            "Category": t.category,
+            "Priority": f"{PRIORITY_EMOJI[t.priority]} {t.priority}",
             "Repeats": t.frequency,
-            "Due": t.due_date.isoformat(),
-            "Done": "✅" if t.completed else "",
+            "Due": t.due_date.strftime("%a %b %d"),
+            "Status": "✅ done" if t.completed else "⏳ to do",
         }
         for t in tasks
     ]
@@ -48,6 +62,14 @@ def show_conflicts(warnings: list[str]) -> None:
         "If someone else can handle one, it's fine to leave it."
     )
 
+
+with st.sidebar:
+    st.markdown("### 💾 Saved data")
+    st.caption("Your pets and tasks are saved to data.json automatically after every change.")
+    if st.button("🗑️ Start over"):
+        DATA_FILE.unlink(missing_ok=True)
+        st.session_state.owner = Owner("Jordan", available_minutes=60)
+        st.rerun()
 
 # --- Owner -----------------------------------------------------------------
 st.subheader("Owner")
@@ -113,9 +135,18 @@ else:
             start = st.time_input("Start time (optional)", value=None, step=900)
         with col3:
             frequency = st.selectbox("Repeats", ["once", "daily", "weekly"])
+        auto_time = st.checkbox("Pick the next free time for me (ignores the start time above)")
         if st.form_submit_button("Add task"):
+            if auto_time:
+                slot = scheduler.find_next_available_slot(int(duration))
+                start_text = slot or ""
+            else:
+                slot = None
+                start_text = start.strftime("%H:%M") if start else ""
             if not task_title.strip():
                 st.error("Please enter a task title.")
+            elif auto_time and slot is None:
+                st.error(f"There's no free {int(duration)}-minute gap between 07:00 and 21:00 today.")
             else:
                 pet = next(p for p in owner.pets if p.name == pet_choice)
                 pet.add_task(
@@ -124,24 +155,31 @@ else:
                         int(duration),
                         priority,
                         category=category,
-                        time=start.strftime("%H:%M") if start else "",
+                        time=start_text,
                         frequency=frequency,
                     )
                 )
-                st.success(f"Added '{task_title.strip()}' for {pet_choice}.")
+                when = f" at {start_text}" if start_text else ""
+                st.success(f"Added '{task_title.strip()}' for {pet_choice}{when}.")
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
         show_pet = st.selectbox("Show tasks for", ["All pets"] + [p.name for p in owner.pets])
     with col2:
         show_status = st.selectbox("Status", ["All", "Not done", "Done"])
+    with col3:
+        sort_choice = st.selectbox("Sort by", ["Time", "Priority, then time"])
     visible = scheduler.filter_tasks(
         pet_name=None if show_pet == "All pets" else show_pet,
         completed={"All": None, "Not done": False, "Done": True}[show_status],
     )
     if visible:
-        st.table(task_rows(scheduler.sort_by_time(visible)))
-        st.caption("Sorted by date, then by time. Tasks with no set time are listed last.")
+        if sort_choice == "Time":
+            st.table(task_rows(scheduler.sort_by_time(visible)))
+            st.caption("Sorted by date, then by time. Tasks with no set time are listed last.")
+        else:
+            st.table(task_rows(scheduler.sort_by_priority_then_time(visible)))
+            st.caption("🔴 High first, then 🟡 medium, then 🟢 low. Each group is in time order.")
     elif owner.get_all_tasks():
         st.info("No tasks match these filters.")
     else:
@@ -160,6 +198,7 @@ else:
         with col2:
             if st.button("Mark done"):
                 scheduler.mark_task_complete(open_tasks[picked])
+                owner.save_to_json(DATA_FILE)  # st.rerun() stops the script, so save first
                 st.rerun()
 
 st.divider()
@@ -193,3 +232,6 @@ if st.button("Generate schedule", type="primary"):
             )
         with st.expander("Why this plan?"):
             st.text(scheduler.explain_plan(plan))
+
+# Save after every run so pets and tasks survive closing the app.
+owner.save_to_json(DATA_FILE)

@@ -284,3 +284,101 @@ def test_zero_minutes_available_skips_everything():
 
     assert scheduler.generate_plan() == []
     assert len(scheduler.skipped) == 1
+
+
+# --- Weekly recurrence keeps its weekday ---------------------------------------
+
+def test_late_weekly_task_stays_on_same_weekday():
+    saturday = date(2026, 10, 10)
+    flea = Task("Flea meds", 5, frequency="weekly", due_date=saturday)
+
+    nxt = flea.next_occurrence(today=date(2026, 10, 12))  # finished 2 days late, on Monday
+
+    assert nxt.due_date == date(2026, 10, 17)
+    assert nxt.due_date.weekday() == saturday.weekday()
+
+
+def test_very_late_weekly_task_skips_to_next_future_weekday():
+    saturday = date(2026, 10, 10)
+    flea = Task("Flea meds", 5, frequency="weekly", due_date=saturday)
+
+    nxt = flea.next_occurrence(today=date(2026, 11, 20))  # more than a month late
+
+    assert nxt.due_date == date(2026, 11, 21)
+    assert nxt.due_date.weekday() == saturday.weekday()
+
+
+def test_early_weekly_task_does_not_repeat_on_its_due_date():
+    flea = Task("Flea meds", 5, frequency="weekly", due_date=date(2026, 10, 10))
+
+    nxt = flea.next_occurrence(today=date(2026, 10, 7))  # finished 3 days early
+
+    assert nxt.due_date == date(2026, 10, 17)
+
+
+# --- Priority, then time -------------------------------------------------------
+
+def test_sort_by_priority_then_time():
+    owner, mochi, biscuit = make_owner()
+    mochi.add_task(Task("Evening walk", 25, "medium", time="18:00"))
+    biscuit.add_task(Task("Night meds", 5, "high", time="20:00"))
+    mochi.add_task(Task("Brush", 10, "low", time="07:00"))
+    biscuit.add_task(Task("Breakfast", 10, "high", time="07:30"))
+
+    ordered = Scheduler(owner).sort_by_priority_then_time(owner.get_all_tasks())
+
+    assert [t.title for t in ordered] == ["Breakfast", "Night meds", "Evening walk", "Brush"]
+
+
+# --- Next available slot -------------------------------------------------------
+
+def test_next_slot_finds_first_gap_big_enough():
+    owner, mochi, biscuit = make_owner()
+    mochi.add_task(Task("Walk", 30, time="07:00"))  # busy 07:00-07:30
+    biscuit.add_task(Task("Feed", 20, time="07:40"))  # busy 07:40-08:00
+    scheduler = Scheduler(owner)
+
+    assert scheduler.find_next_available_slot(10) == "07:30"  # fits in the 10-min gap
+    assert scheduler.find_next_available_slot(15) == "08:00"  # gap too small, goes after
+
+
+def test_next_slot_on_empty_day_is_start_of_day():
+    owner, _, _ = make_owner()
+
+    assert Scheduler(owner).find_next_available_slot(30) == "07:00"
+
+
+def test_next_slot_ignores_completed_tasks_and_other_days():
+    owner, mochi, _ = make_owner()
+    mochi.add_task(Task("Done walk", 30, time="07:00", completed=True))
+    mochi.add_task(Task("Tomorrow", 30, time="07:00", due_date=TODAY + timedelta(days=1)))
+
+    assert Scheduler(owner).find_next_available_slot(30) == "07:00"
+
+
+def test_next_slot_returns_none_when_day_is_full():
+    owner, mochi, _ = make_owner()
+    mochi.add_task(Task("All day", 14 * 60, time="07:00"))  # 07:00-21:00
+
+    assert Scheduler(owner).find_next_available_slot(5) is None
+
+
+# --- Saving and loading --------------------------------------------------------
+
+def test_save_and_load_round_trip(tmp_path):
+    owner, mochi, biscuit = make_owner(minutes=75)
+    mochi.add_task(Task("Walk", 30, "high", category="walk", time="07:30", frequency="daily"))
+    biscuit.add_task(Task("Vet", 60, completed=True, due_date=TODAY - timedelta(days=2)))
+    path = tmp_path / "data.json"
+
+    owner.save_to_json(path)
+    loaded = Owner.load_from_json(path)
+
+    assert loaded == owner
+    assert loaded.pets[1].tasks[0].due_date == TODAY - timedelta(days=2)
+    assert loaded.pets[0].tasks[0].pet_name == "Mochi"
+
+
+def test_load_missing_file_raises(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        Owner.load_from_json(tmp_path / "nope.json")
