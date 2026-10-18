@@ -1,28 +1,20 @@
-# PawPal+ (Module 2 Project)
+# 🐾 PawPal+
 
-You are building **PawPal+**, a Streamlit app that helps a pet owner plan care tasks for their pet.
+PawPal+ is a Streamlit app that helps a busy pet owner plan the day's pet care. You add your pets and their tasks (walks, feeding, meds, grooming, play), tell it how much time you have, and it builds a daily plan. It puts the most important tasks first, warns you when two tasks clash, and explains why it picked what it did.
 
-## Scenario
+## ✨ Features
 
-A busy pet owner needs help staying consistent with pet care. They want an assistant that can:
+- **Multiple pets:** one owner can have several pets, and every feature works across all of them.
+- **Daily plan within your free time:** the most important tasks get picked first, and anything that doesn't fit in your available minutes is skipped (with a reason).
+- **Sorting by time:** tasks are listed by date and then by time of day. Tasks with no set time go at the end.
+- **Sorting by priority:** high priority comes first, and the shorter task wins a tie, so more tasks fit in the day.
+- **Filtering:** see tasks for one pet, only the ones that still need doing, only finished ones, or a mix.
+- **Conflict warnings:** if two tasks overlap in time (same pet or different pets), the app shows a warning instead of crashing.
+- **Daily and weekly recurrence:** when you finish a repeating task, the next one is added automatically (tomorrow for daily, in 7 days for weekly).
+- **Plan explanation:** a plain-English summary of why each task was chosen or skipped.
+- **Input check:** priority must be low, medium, or high, so a typo can't break the sorting.
 
-- Track pet care tasks (walks, feeding, meds, enrichment, grooming, etc.)
-- Consider constraints (time available, priority, owner preferences)
-- Produce a daily plan and explain why it chose that plan
-
-Your job is to design the system first (UML), then implement the logic in Python, then connect it to the Streamlit UI.
-
-## What you will build
-
-Your final app should:
-
-- Let a user enter basic owner + pet info
-- Let a user add/edit tasks (duration + priority at minimum)
-- Generate a daily schedule/plan based on constraints and priorities
-- Display the plan clearly (and ideally explain the reasoning)
-- Include tests for the most important scheduling behaviors
-
-## Getting started
+## 🚀 Getting started
 
 ### Setup
 
@@ -32,15 +24,74 @@ source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### Suggested workflow
+### Run it
 
-1. Read the scenario carefully and identify requirements and edge cases.
-2. Draft a UML diagram (classes, attributes, methods, relationships).
-3. Convert UML into Python class stubs (no logic yet).
-4. Implement scheduling logic in small increments.
-5. Add tests to verify key behaviors.
-6. Connect your logic to the Streamlit UI in `app.py`.
-7. Refine UML so it matches what you actually built.
+```bash
+streamlit run app.py   # the web app
+python main.py         # terminal demo
+python -m pytest       # tests
+```
+
+## 🏗️ Architecture
+
+The code is split into a logic layer (`pawpal_system.py`) and a UI (`app.py`). `Owner`, `Pet`, and `Task` hold the data, and `Scheduler` does all of the planning. The source for this diagram is in [`diagrams/uml_final.mmd`](diagrams/uml_final.mmd).
+
+```mermaid
+classDiagram
+    %% PawPal+ final UML, matching pawpal_system.py
+
+    class Owner {
+        +str name
+        +int available_minutes
+        +list~str~ preferences
+        +list~Pet~ pets
+        +add_pet(pet: Pet) None
+        +get_all_tasks() list~Task~
+    }
+
+    class Pet {
+        +str name
+        +str species
+        +int age
+        +list~Task~ tasks
+        +add_task(task: Task) None
+        +remove_task(title: str) None
+        +complete_task(title: str) Task
+    }
+
+    class Task {
+        +str title
+        +int duration_minutes
+        +str priority
+        +str category
+        +str time
+        +str frequency
+        +date due_date
+        +str pet_name
+        +bool completed
+        +mark_complete() None
+        +priority_rank() int
+        +next_occurrence() Task
+    }
+
+    class Scheduler {
+        +Owner owner
+        +list~Task~ skipped
+        +generate_plan() list~Task~
+        +explain_plan(plan: list~Task~) str
+        +sort_by_time(tasks: list~Task~) list~Task~
+        +sort_by_priority(tasks: list~Task~) list~Task~
+        +filter_tasks(pet_name: str, completed: bool) list~Task~
+        +detect_conflicts(tasks: list~Task~) list~str~
+        +mark_task_complete(task: Task) Task
+    }
+
+    Owner "1" *-- "*" Pet : owns
+    Pet "1" *-- "*" Task : has
+    Scheduler --> Owner : reads tasks via get_all_tasks()
+    Scheduler ..> Task : sorts, filters, plans
+    Task ..> Task : next_occurrence() creates
+```
 
 ## 🖥️ Sample Output
 
@@ -159,12 +210,54 @@ All the scheduling code is in the `Scheduler` class in `pawpal_system.py`. It ge
 
 ## 📸 Demo Walkthrough
 
-Describe your app in numbered steps so a reader can follow along without watching a video:
+### What you can do in the app
 
-1. <!-- Describe this step -->
-2. <!-- Describe this step -->
-3. <!-- Describe this step -->
-4. <!-- Describe this step -->
-5. <!-- Add more steps as needed -->
+The app is one page with four sections, from top to bottom:
 
-**Screenshot or video** *(optional)*: <!-- Insert a screenshot or link to a demo video here -->
+- **Owner:** set your name and how many minutes you have for pet care today.
+- **Pets:** add a pet with a name, species, and age. The app won't let you add two pets with the same name.
+- **Tasks:** add a task for a pet with a title, how long it takes, priority, category, an optional start time, and whether it repeats (once, daily, or weekly). Below the form is a table of tasks that you can filter by pet and by status (all, not done, done). The table is always sorted by date and time. You can also pick any open task and mark it done.
+- **Today's Schedule:** press **Generate schedule** to get today's plan.
+
+### Example workflow
+
+1. Run `streamlit run app.py`. Set the owner name to **Jordan** and minutes available to **60**.
+2. Add two pets: **Mochi** (dog) and **Biscuit** (cat).
+3. Add tasks for Mochi: **Morning walk** (30 min, high, 07:30, daily), **Evening walk** (25 min, medium, 18:00), and **Bath** (40 min, low, no time).
+4. Add a task for Biscuit: **Breakfast** (10 min, high, 07:30).
+5. As soon as Breakfast is added, a yellow warning appears under the task table: *"1 time clash today: 'Morning walk' (Mochi, 07:30-08:00) overlaps 'Breakfast' (Biscuit, 07:30-07:40)"*. It also gives a tip to move one task or let someone else handle it.
+6. Set the filters to **Mochi** and **Not done**. The table now shows only Mochi's three tasks, in time order, with the Bath (no set time) last.
+7. Press **Generate schedule**. Three numbers appear at the top: **2 tasks planned**, **40 / 60 minutes used**, and **2 skipped**. The plan table lists Breakfast and Morning walk at 07:30. The clash warning shows up again, and blue notes explain that the Evening walk (25 min) and Bath (40 min) were skipped because only 20 minutes were left after the more important tasks.
+8. Open **Why this plan?** to read a plain-English reason for every task.
+9. Mark **Morning walk** as done. It shows ✅ in the table, and a new Morning walk due tomorrow is added automatically because it repeats daily.
+
+### Scheduler behaviors shown
+
+| Behavior | Where you see it |
+|---|---|
+| Sorting by time | The task table and the plan table are both in time order, with untimed tasks last. |
+| Filtering | The "Show tasks for" and "Status" dropdowns above the task table. |
+| Priority + time budget | High-priority tasks get picked first. Tasks that don't fit are listed as skipped, with how many minutes were left. |
+| Conflict warnings | A yellow warning box under the task table and again with the plan. |
+| Daily recurrence | Marking a daily task done adds the next one for tomorrow. |
+
+### Sample CLI output
+
+The same logic runs in the terminal with `python main.py`. Here's the schedule part of its output (the full output is in the Sample Output section above):
+
+```
+Today's Schedule
+================
+Plan for Jordan: 90 of 90 minutes used.
+    07:30  Breakfast (Biscuit), 10 min, chosen because it is high priority and fits the time budget
+    07:30  Morning walk (Mochi), 30 min, chosen because it is high priority and fits the time budget
+    12:00  Thyroid meds (Biscuit), 5 min, chosen because it is high priority and fits the time budget
+    18:00  Flea treatment (Mochi), 5 min, chosen because it is medium priority and fits the time budget
+    18:00  Evening walk (Mochi), 25 min, chosen because it is medium priority and fits the time budget
+    19:30  Laser pointer play (Biscuit), 15 min, chosen because it is medium priority and fits the time budget
+  Skipped  Bath and brush (Mochi): needs 40 min, only 0 min left after higher-priority tasks
+  Warning: 'Breakfast' (Biscuit, 07:30-07:40) overlaps 'Morning walk' (Mochi, 07:30-08:00)
+  Warning: 'Flea treatment' (Mochi, 18:00-18:05) overlaps 'Evening walk' (Mochi, 18:00-18:25)
+
+Completed 'Morning walk' -> next one created for 2026-10-18
+```

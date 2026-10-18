@@ -1,3 +1,5 @@
+from datetime import date
+
 import streamlit as st
 
 from pawpal_system import Owner, Pet, Scheduler, Task
@@ -32,6 +34,19 @@ def task_rows(tasks: list[Task]) -> list[dict]:
         }
         for t in tasks
     ]
+
+
+def show_conflicts(warnings: list[str]) -> None:
+    """Show time clashes as one clear warning box with a tip on what to do."""
+    if not warnings:
+        return
+    noun = "clash" if len(warnings) == 1 else "clashes"
+    lines = "\n".join(f"- {w}" for w in warnings)
+    st.warning(
+        f"**⚠️ {len(warnings)} time {noun} today**\n\n{lines}\n\n"
+        "If you're doing these yourself, try moving one to a different time. "
+        "If someone else can handle one, it's fine to leave it."
+    )
 
 
 # --- Owner -----------------------------------------------------------------
@@ -115,14 +130,28 @@ else:
                 )
                 st.success(f"Added '{task_title.strip()}' for {pet_choice}.")
 
-    show_pet = st.selectbox("Show tasks for", ["All pets"] + [p.name for p in owner.pets])
-    visible = scheduler.filter_tasks(pet_name=None if show_pet == "All pets" else show_pet)
+    col1, col2 = st.columns(2)
+    with col1:
+        show_pet = st.selectbox("Show tasks for", ["All pets"] + [p.name for p in owner.pets])
+    with col2:
+        show_status = st.selectbox("Status", ["All", "Not done", "Done"])
+    visible = scheduler.filter_tasks(
+        pet_name=None if show_pet == "All pets" else show_pet,
+        completed={"All": None, "Not done": False, "Done": True}[show_status],
+    )
     if visible:
         st.table(task_rows(scheduler.sort_by_time(visible)))
+        st.caption("Sorted by date, then by time. Tasks with no set time are listed last.")
+    elif owner.get_all_tasks():
+        st.info("No tasks match these filters.")
     else:
         st.info("No tasks yet. Add one above.")
 
-    open_tasks = scheduler.filter_tasks(completed=False)
+    # Warn about clashes as soon as they exist, not only after generating a plan.
+    due_today = [t for t in scheduler.filter_tasks(completed=False) if t.due_date <= date.today()]
+    show_conflicts(scheduler.detect_conflicts(due_today))
+
+    open_tasks = scheduler.sort_by_time(scheduler.filter_tasks(completed=False))
     if open_tasks:
         col1, col2 = st.columns([3, 1], vertical_alignment="bottom")
         with col1:
@@ -143,12 +172,24 @@ if st.button("Generate schedule", type="primary"):
         st.info("No tasks are due today.")
     else:
         used = sum(t.duration_minutes for t in plan)
-        st.success(f"Planned {len(plan)} task(s), using {used} of {owner.available_minutes} minutes.")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Tasks planned", len(plan))
+        col2.metric("Minutes used", f"{used} / {owner.available_minutes}")
+        col3.metric("Skipped", len(scheduler.skipped))
+
         if plan:
-            st.table(task_rows(plan))
-        for warning in scheduler.detect_conflicts(plan):
-            st.warning(f"Time conflict: {warning}")
+            st.success(f"Here's your plan for today, {owner.name}. Most important tasks were picked first.")
+            st.table(
+                [
+                    {k: row[k] for k in ("Time", "Task", "Pet", "Minutes", "Priority")}
+                    for row in task_rows(plan)
+                ]
+            )
+        show_conflicts(scheduler.detect_conflicts(plan))
         for t in scheduler.skipped:
-            st.info(f"Skipped **{t.title}** ({t.pet_name}): needs {t.duration_minutes} min, not enough time left.")
+            st.info(
+                f"Skipped **{t.title}** ({t.pet_name}): it needs {t.duration_minutes} min, "
+                f"but only {owner.available_minutes - used} min were left after more important tasks."
+            )
         with st.expander("Why this plan?"):
             st.text(scheduler.explain_plan(plan))
