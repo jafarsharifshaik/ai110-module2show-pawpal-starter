@@ -4,13 +4,25 @@
 
 **a. Initial design**
 
-- Briefly describe your initial UML design.
-- What classes did you include, and what responsibilities did you assign to each?
+My initial UML has four classes with simple "has-a" relationships: an **Owner** has many **Pets**, each **Pet** has many **Tasks**, and a **Scheduler** works on behalf of one Owner to build the day's plan.
+
+- **Task**: a single care activity. It holds what needs to happen (title, category), how long it takes, its priority, an optional preferred time, how often it repeats (once/daily/weekly), its due date, which pet it is for, and whether it's done. It can mark itself complete, turn its priority into a number for sorting, and create its next occurrence if it repeats.
+- **Pet**: basic pet info (name, species, age) plus the list of tasks that belong to it. It is responsible for adding and removing its own tasks.
+- **Owner**: the person using the app. It stores how many minutes they have for pet care each day, their preferences, and their pets. It can add pets and gather every task across all pets into one list.
+- **Scheduler**: the "brain". It takes an Owner and is responsible for all planning logic: sorting tasks by priority or time, filtering by pet or completion status, detecting time conflicts, choosing which tasks fit in the available time, and explaining why the plan looks the way it does.
+
+I kept data (Owner, Pet, Task as dataclasses) separate from logic (Scheduler) so the scheduling rules live in one place and are easy to test.
 
 **b. Design changes**
 
-- Did your design change during implementation?
-- If yes, describe at least one change and why you made it.
+Yes. After drafting the skeleton, I asked my AI assistant to review `pawpal_system.py` for missing relationships and logic bottlenecks, and made four changes:
+
+1. **`Pet.add_task()` now stamps `task.pet_name`.** The pet's name was stored on both Pet and Task, so the two could disagree (e.g., a task under Mochi labeled "Biscuit"). Letting the Pet set it keeps a single source of truth.
+2. **Added `Scheduler.skipped`.** `generate_plan()` only returned chosen tasks, so `explain_plan()` had no way to say *why* something was left out. The scheduler now records skipped tasks so the explanation can cover both.
+3. **Added `Pet.complete_task(title)`.** `Task.next_occurrence()` existed, but nothing called it, so recurring tasks would never come back. Completing a task through the Pet marks it done and adds the next daily/weekly copy to the pet's list.
+4. **Task validates `priority` in `__post_init__`.** A value like "High" or "urgent" would silently get the wrong sort rank. Priority is now lowercased and must be low/medium/high.
+
+One suggestion I considered but did **not** adopt: caching the result of `Owner.get_all_tasks()`. With only a few pets and tasks the cost of rebuilding the list is negligible, and a cache could return stale data after tasks are added or completed.
 
 ---
 
